@@ -72,6 +72,27 @@ module.exports.datastores = {
 ```
 
 If DAX config is not provided (or DAX init fails), the adapter automatically falls back to DynamoDB `DocumentClient`.
+
+### Read Freshness With DAX
+
+To prioritize latest reads after create/update/delete when DAX is active, this adapter enables strongly consistent reads by default (where DynamoDB supports them).
+
+- Config key: `consistentReadOnDax` (default: `true`)
+- Optional: you do **not** need to pass it unless you want to disable/tune behavior
+- Applied on `find` query/scan reads when using DAX
+- Limitation: DynamoDB does not support strongly consistent reads on Global Secondary Indexes (GSI), so GSI queries remain eventually consistent.
+- Accepted values: boolean (`true/false`) or env-style strings (`"true"`, `"false"`, `"1"`, `"0"`, `"yes"`, `"no"`, `"on"`, `"off"`)
+
+Example:
+
+```js
+default: {
+  adapter: 'sails-dynamo-v1-dax',
+  region: process.env.DYNAMODB_REGION,
+  daxEndpoints: process.env.DAX_ENDPOINT,
+  consistentReadOnDax: true
+}
+```
 ## Configuring Models
 
 SailsJS creates an archive models by default, it is recommended that you disable it by setting 'archiveModelIdentity' property to false in config/models.js otherwise a table named as archive will be created

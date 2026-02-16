@@ -5,6 +5,10 @@ const util = require('./utils/app.util');
 
 let dynamoDb;
 let client;
+let isDaxClientActive = false;
+let useConsistentReadWithDax = true;
+const TRUE_LIKE_VALUES = new Set(['true', '1', 'yes', 'y', 'on']);
+const FALSE_LIKE_VALUES = new Set(['false', '0', 'no', 'n', 'off', '']);
 
 function normalizeDaxEndpoints(datastoreConfig) {
   const rawEndpoints =
@@ -25,6 +29,32 @@ function normalizeDaxEndpoints(datastoreConfig) {
     .split(',')
     .map((endpoint) => endpoint.trim())
     .filter(Boolean);
+}
+
+function normalizeBooleanFlag(value, defaultValue) {
+  if (value === undefined || value === null) {
+    return defaultValue;
+  }
+
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  if (typeof value === 'number') {
+    return value !== 0;
+  }
+
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (TRUE_LIKE_VALUES.has(normalized)) {
+      return true;
+    }
+    if (FALSE_LIKE_VALUES.has(normalized)) {
+      return false;
+    }
+  }
+
+  return defaultValue;
 }
 /**
  * Module state
@@ -104,6 +134,7 @@ module.exports = {
     const { accessKeyId, secretAccessKey, region, url } = datastoreConfig;
     const credentials = await this.addProvider(accessKeyId, secretAccessKey);
     const daxEndpoints = normalizeDaxEndpoints(datastoreConfig);
+    useConsistentReadWithDax = normalizeBooleanFlag(datastoreConfig.consistentReadOnDax, true);
 
     dynamoDb = new AWS.DynamoDB({
       credentials,
@@ -121,6 +152,7 @@ module.exports = {
           credentials
         });
         client = new AWS.DynamoDB.DocumentClient({ service: dax });
+        isDaxClientActive = true;
         return;
       } catch (error) {
         console.warn(
@@ -130,6 +162,7 @@ module.exports = {
     }
 
     client = new AWS.DynamoDB.DocumentClient({ service: dynamoDb });
+    isDaxClientActive = false;
   },
   //  ╔═╗═╗ ╦╔═╗╔═╗╔═╗╔═╗  ┌─┐┬─┐┬┬  ┬┌─┐┌┬┐┌─┐
   //  ║╣ ╔╩╦╝╠═╝║ ║╚═╗║╣   ├─┘├┬┘│└┐┌┘├─┤ │ ├┤
@@ -556,6 +589,11 @@ module.exports = {
       dynamoQuery.Limit = limit;
     }
     let data;
+    // Read-after-write freshness: when DAX is active, use strongly consistent reads where supported.
+    // NOTE: DynamoDB does not support ConsistentRead on global secondary indexes.
+    if (isDaxClientActive && useConsistentReadWithDax && indexes.type !== 'globalIndex') {
+      dynamoQuery.ConsistentRead = true;
+    }
     if (indexes.type === 'localIndex') {
       console.log('Local Index Query');
       let IndexName = `${indexes.keys.secondary}_local_index`;
